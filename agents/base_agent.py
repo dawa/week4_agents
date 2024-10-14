@@ -1,6 +1,7 @@
 import os
 import chainlit as cl
 
+DEBUG = True
 class Agent:
     """
     Base class for all agents.
@@ -28,10 +29,28 @@ class Agent:
                     "additionalProperties": False,
                 },
             }
+        },
+       {
+            "type": "function",
+            "function": {
+                "name": "callAgent",
+                "description": "Call an agent that will implement or update the appropriate milestone.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "The name of the agent to call.",
+                        },
+                    },
+                    "required": ["name"],
+                    "additionalProperties": False,
+                },
+            }
         }
     ]
 
-    def __init__(self, name, client, prompt="", gen_kwargs=None):
+    def __init__(self, name, client, prompt="", gen_kwargs=None, implementation_agent=None):
         self.name = name
         self.client = client
         self.prompt = prompt
@@ -39,6 +58,34 @@ class Agent:
             "model": "gpt-4o",
             "temperature": 0.2
         }
+        self.implementation_agent = implementation_agent
+        if DEBUG:
+            print("DEBUG: implementation_agent:")
+            print("type:", type(self.implementation_agent))
+            print("value:", self.implementation_agent)
+
+    async def call_agent(self, name, message_history):
+        """
+        Calls another agent with the given name and message history.
+        """
+        # Create a new message history for the called agent
+        called_agent_message_history = message_history.copy()
+        if DEBUG:
+            print("DEBUG: name:")
+            print("name:", name)
+        if name == "implementation_agent" or name == "implementation":
+            if DEBUG:
+                print("DEBUG: calling {name}")
+            implementation_response = await self.implementation_agent.execute(called_agent_message_history)
+            message_history.append({
+            "role": "system",
+            "content": implementation_response
+            })
+            if DEBUG:
+                print("DEBUG: calling execute for implementation_agent")
+            return await self.execute(message_history)
+        else:
+            print("Unknown agent called: {name}")
 
     async def execute(self, message_history):
         """
@@ -63,25 +110,37 @@ class Agent:
 
         function_name = ""
         arguments = ""
+        function_calls = {}
         async for part in stream:
             if part.choices[0].delta.tool_calls:
-                tool_call = part.choices[0].delta.tool_calls[0]
-                function_name_delta = tool_call.function.name or ""
-                arguments_delta = tool_call.function.arguments or ""
+                for tool_call in part.choices[0].delta.tool_calls:
+                    if tool_call.index is not None:
+                        if tool_call.index not in function_calls:
+                            function_calls[tool_call.index] = {"name": "", "arguments": ""}
 
-                function_name += function_name_delta
-                arguments += arguments_delta
+                        if tool_call.function.name:
+                            function_calls[tool_call.index]["name"] += tool_call.function.name
+
+                        if tool_call.function.arguments:
+                            function_calls[tool_call.index]["arguments"] += tool_call.function.arguments
 
             if token := part.choices[0].delta.content or "":
                 await response_message.stream_token(token)
 
-        if function_name:
-            print("DEBUG: function_name:")
-            print("type:", type(function_name))
-            print("value:", function_name)
-            print("DEBUG: arguments:")
-            print("type:", type(arguments))
-            print("value:", arguments)
+        if DEBUG:
+            print("DEBUG: function_calls:")
+            print("type:", type(function_calls))
+            print("value:", function_calls)
+        for index, function_call in function_calls.items():
+            function_name = function_call["name"]
+            arguments = function_call["arguments"]
+            if DEBUG:
+                print("DEBUG: function_name:")
+                print("type:", type(function_name))
+                print("value:", function_name)
+                print("DEBUG: arguments:")
+                print("type:", type(arguments))
+                print("value:", arguments)
 
             if function_name == "updateArtifact":
                 import json
@@ -106,8 +165,17 @@ class Agent:
                         if token := part.choices[0].delta.content or "":
                             await response_message.stream_token(token)
 
+            elif function_name == "callAgent":
+                import json
+                arguments_dict = json.loads(arguments)
+                agent_name = arguments_dict.get("agent_name")
+
+                if agent_name:
+                    await self.call_agent(agent_name, message_history)
+
         else:
-            print("No tool call")
+            if DEBUG:
+                print("No tool call")
 
         await response_message.update()
 

@@ -12,6 +12,7 @@ load_dotenv()
 from langfuse.decorators import observe
 from langfuse.openai import AsyncOpenAI
 from agents.base_agent import Agent
+from agents.implementation_agent import ImplementationAgent
 
 client = AsyncOpenAI()
 
@@ -36,6 +37,10 @@ project. You will not implement the plan, and will not write any code.
 If the plan has already been saved, no need to save it again unless there is feedback. Do not \
 use the tool again if there are no changes.
 
+If the user request a milestone to be completed, call the implementation agent and guide it to \
+implement or update the appropriate milestone. The agent should mark off the milestone in plan.md \
+and update index.html and style.css
+
 For the contents of the markdown-formatted plan, create two sections, "Overview" and "Milestones".
 
 In a section labeled "Overview", analyze the image, and describe the elements on the page, \
@@ -56,8 +61,9 @@ Milestones should be formatted like this:
  - [ ] 3. This is the third milestone
 """
 
-# Create an instance of the Agent class
+# Create an instances of the Agent classes
 planning_agent = Agent(name="Planning Agent", client=client, prompt=PLANNING_PROMPT)
+implementation_agent = ImplementationAgent(name="implementation_agent", client=client)
 
 @observe
 @cl.on_chat_start
